@@ -80,3 +80,33 @@ cd backend
 npm install
 npm run dev
 ```
+
+
+## Backend client and gateway Core components
+	
+.env.example 	/ config/cardpointe.js: environment-scoped 	credentials (UAT and production side by side) selected via a single 	CARDPOINTE_ENV switch. the config module derives the gateway, 	CardSecure, and hosted-iframe URLs from the configured site and 	validates that site, merchid, apiUser and apiPass are all present, 	failing fast with a clear error if not.
+ 	
+lib/cardpointe-client.js: 	a client class wrapping every 	CardPointe operation with Basic Auth header construction, a 	35-second timeout and a helper to detect gateway timeouts (respcode 62).
+ 	
+lib/validators.js: schemas for every 	operation , rejecting 	incorrect requests before they reach 	CardPointe; and for switching to ACH payments
+ 	
+routes/payments.js, 	routes/webhooks.js, routes/query.js: Express 	endpoints for tokenize, auth, capture, void, refund, inquire and 	funding. 
+ 	
+server.js: 	boots the app, exposes a 	/health endpoint reporting the active CardPointe environment, and 	sets the payments routes.
+ 	
+routes/ghl.js 	/ location-store.js / merchant-config.js: bind 	each clinic's GoHighLevel Location ID to its CardPointe merchant 	credentials, supporting the multi- client AdVital setup. This way, each one has its own merchID.
+
+
+##Checkout
+
+Context identification: the app waits for a payment_initiate_props message from the parent GHL frame (amount, locationId, publishableKey, orderId, transactionId, contact) before showing any form. Both are captured through CardPointe's Hosted iFrame Tokenizer — the same iframe for both — so the card number or routing/account never touches this app's own inputs. 
+
+CardPointe returns a token via postMessage, which enables the "Pay now" button once received.
+
+Submitting payment: on submit, the token (never the raw card or bank data), amount, and order/transaction/location context are sent to POST /checkout/pay.
+
+Backend handling: the backend resolves the clinic from locationId/publishableKey, selects that clinic's own CardPointe gateway and credentials, and authorizes the charge with an idempotency key tied to the transaction ID so a retry can never duplicate a charge. On approval, the transaction is recorded and a payment.captured webhook is sent. The response to the frontend contains only the approval status, charge ID, and reference codes — never merchant credentials. Declines are returned as 402 with the reason; timeouts are returned as 504 so the frontend can tell the difference.
+
+Result: the frontend shows a success or error screen and, either way, posts a message back to the parent GHL frame so GHL's own payment flow knows how to close out — the same postMessage pattern used by the admin panel, but here carrying the outcome of the charge instead of session data.
+
+
